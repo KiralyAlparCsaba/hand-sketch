@@ -98,6 +98,33 @@ class Document:
             out.append(self.current_group)
         return out
 
+    def erase_at(self, canvas_pt: Point, radius: float) -> None:
+        """Pixel-style eraser: drop every point within `radius` of canvas_pt
+        from every committed stroke. A stroke that's cut in the middle is
+        split into two strokes (the surviving prefix and suffix). Strokes
+        that drop below 2 points are removed; groups with no strokes left
+        are removed. In-progress strokes are not touched."""
+        tx, ty = canvas_pt
+        r_sq = radius * radius
+        new_groups: List[Group] = []
+        for group in self.groups:
+            new_strokes: List[Stroke] = []
+            for stroke in group.strokes:
+                run: List[Point] = []
+                for px, py in stroke.points:
+                    if (px - tx) * (px - tx) + (py - ty) * (py - ty) <= r_sq:
+                        # Inside eraser: flush the surviving run, start fresh.
+                        if len(run) >= 2:
+                            new_strokes.append(Stroke(points=run))
+                        run = []
+                    else:
+                        run.append((px, py))
+                if len(run) >= 2:
+                    new_strokes.append(Stroke(points=run))
+            if new_strokes:
+                new_groups.append(Group(strokes=new_strokes))
+        self.groups = new_groups
+
     def hit_test_group(
         self, canvas_pt: Point, threshold: float
     ) -> Optional[Group]:

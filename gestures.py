@@ -22,6 +22,7 @@ class Gesture(Enum):
     DRAW = "draw"
     PINCH = "pinch"
     PALM = "palm"
+    ERASE = "erase"
 
 
 # MediaPipe landmark indices we use.
@@ -53,6 +54,10 @@ EXTENSION_MARGIN = 1.05  # tip must be this much farther from wrist than PIP
 # the transition into a pinch (thumb traveling toward index) goes through a
 # NONE dead zone rather than flickering through DRAW.
 DRAW_THUMB_AWAY = 0.50
+
+# ERASE (peace sign) uses the same buffer logic so a pinch transition
+# doesn't flicker through ERASE either.
+ERASE_THUMB_AWAY = 0.50
 
 
 def _dist(a: np.ndarray, b: np.ndarray) -> float:
@@ -123,6 +128,10 @@ def classify_raw(
     if (index_ext and not middle_ext and not ring_ext and not pinky_ext
             and pinch_d > DRAW_THUMB_AWAY):
         return Gesture.DRAW, features
+
+    if (index_ext and middle_ext and not ring_ext and not pinky_ext
+            and pinch_d > ERASE_THUMB_AWAY):
+        return Gesture.ERASE, features
 
     if index_ext and middle_ext and ring_ext and pinky_ext:
         return Gesture.PALM, features

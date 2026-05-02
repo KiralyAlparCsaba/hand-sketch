@@ -14,7 +14,8 @@ import cv2
 import numpy as np
 
 from document import Document
-from gestures import Gesture, GestureFeatures
+from gestures import Gesture, GestureFeatures, INDEX_TIP
+from modes import ERASER_RADIUS
 from tracker import HAND_CONNECTIONS, HandLandmarks
 from viewport import Viewport
 
@@ -31,8 +32,12 @@ MODE_COLORS = {
     Gesture.DRAW:  (255, 255,   0),  # cyan
     Gesture.PINCH: (  0, 255, 255),  # yellow
     Gesture.PALM:  (255,   0, 255),  # magenta
+    Gesture.ERASE: (  0,   0, 255),  # red
     Gesture.NONE:  (160, 160, 160),  # gray
 }
+
+COLOR_ERASER_OUTLINE = (0, 0, 255)   # red ring around eraser
+COLOR_ERASER_FILL = (0, 0, 200)      # darker red translucent fill
 
 
 def render_frame(
@@ -53,8 +58,28 @@ def render_frame(
     _draw_strokes(canvas, document, viewport)
     if landmarks is not None:
         _draw_hand(canvas, landmarks)
+        if mode == Gesture.ERASE:
+            _draw_eraser_cursor(canvas, landmarks, viewport)
     _draw_hud(canvas, mode, raw, features, landmarks)
     return canvas
+
+
+def _draw_eraser_cursor(
+    canvas: np.ndarray, landmarks: HandLandmarks, viewport: Viewport
+) -> None:
+    """Translucent red disc + outline ring at the index fingertip,
+    sized to match the actual erase radius in canvas units."""
+    tip = landmarks.pixels[INDEX_TIP]
+    radius_screen = max(1, int(round(ERASER_RADIUS * viewport.zoom)))
+    center = (int(tip[0]), int(tip[1]))
+
+    # Translucent fill: blend an overlay so we don't fully obscure strokes.
+    overlay = canvas.copy()
+    cv2.circle(overlay, center, radius_screen, COLOR_ERASER_FILL, thickness=-1)
+    cv2.addWeighted(overlay, 0.25, canvas, 0.75, 0, canvas)
+
+    # Crisp outline.
+    cv2.circle(canvas, center, radius_screen, COLOR_ERASER_OUTLINE, thickness=2)
 
 
 def _draw_strokes(

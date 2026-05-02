@@ -12,7 +12,7 @@ import cv2
 
 from document import Document
 from gestures import GestureStateMachine, classify_raw
-from modes import DrawHandler, GrabHandler, ViewHandler
+from modes import DrawHandler, EraseHandler, GrabHandler, ViewHandler
 from render import render_frame
 from tracker import HandTracker
 from viewport import Viewport
@@ -29,6 +29,7 @@ def main():
     viewport = Viewport()
 
     draw_handler = DrawHandler(smoothing_alpha=0.5)
+    erase_handler = EraseHandler()
     grab_handler = GrabHandler()
     view_handler = ViewHandler()
 
@@ -46,6 +47,7 @@ def main():
             mode, transitions = state_machine.update(raw_gesture)
 
             draw_handler.handle(mode, raw_gesture, transitions, landmarks, document, viewport)
+            erase_handler.handle(mode, raw_gesture, transitions, landmarks, document, viewport)
             grab_handler.handle(mode, raw_gesture, transitions, landmarks, document, viewport)
             view_handler.handle(mode, raw_gesture, transitions, landmarks, document, viewport)
 
