@@ -13,8 +13,8 @@ from typing import List, Optional
 
 import numpy as np
 
-from document import Document
-from gestures import Gesture, INDEX_TIP, Transition
+from document import Document, Group, Point
+from gestures import Gesture, INDEX_TIP, THUMB_TIP, Transition
 from tracker import HandLandmarks
 from viewport import Viewport
 
@@ -22,6 +22,10 @@ from viewport import Viewport
 # Eraser radius in canvas units. Imported by render.py so the cursor
 # circle visually matches the actual erase area.
 ERASER_RADIUS = 30.0
+
+# Maximum distance (canvas units) from the pinch midpoint to a stroke for
+# a grab to register. Imported by render.py for the pinch indicator ring.
+GRAB_HIT_THRESHOLD = 30.0
 
 
 class EMAFilter2D:
@@ -129,7 +133,29 @@ class EraseHandler:
 
 
 class GrabHandler:
-    """Stub — implemented in phase 4 (PINCH-to-grab)."""
+    """PINCH-to-grab: on entering PINCH, hit-test for the nearest committed
+    group. While the pinch is held, translate that group so its initial
+    pinch point follows the hand.
+
+    The translation works on a SNAPSHOT of the group's points taken at grab
+    time — every frame we recompute `new = original + delta`, never
+    incrementally translate. This avoids floating-point drift over long
+    drags.
+
+    The pinch midpoint is EMA-smoothed so the grabbed group doesn't shake
+    with hand jitter.
+    """
+
+    def __init__(
+        self,
+        hit_threshold: float = GRAB_HIT_THRESHOLD,
+        smoothing_alpha: float = 0.5,
+    ):
+        self._hit_threshold = hit_threshold
+        self._pinch_filter = EMAFilter2D(alpha=smoothing_alpha)
+        self._grabbed_group: Optional[Group] = None
+        self._initial_pinch_canvas: Optional[Tuple[float, float]] = None
+        self._original_points: Optional[List[List[Point]]] = None
 
     def handle(
         self,
@@ -140,7 +166,77 @@ class GrabHandler:
         document: Document,
         viewport: Viewport,
     ) -> None:
-        pass
+        for kind, gesture in transitions:
+            if gesture != Gesture.PINCH:
+                continue
+            if kind == "exit":
+                self._release()
+            elif kind == "enter":
+                self._try_grab(landmarks, document, viewport)
+
+        if (
+            mode == Gesture.PINCH
+            and raw == Gesture.PINCH
+            and landmarks is not None
+            and self._grabbed_group is not None
+        ):
+            self._update_position(landmarks, viewport)
+
+    # ---- internals ----
+
+    def _pinch_midpoint_smoothed(self, landmarks: HandLandmarks) -> np.ndarray:
+        thumb = landmarks.pixels[THUMB_TIP].astype(np.float32)
+        index = landmarks.pixels[INDEX_TIP].astype(np.float32)
+        mid = (thumb + index) * 0.5
+        return self._pinch_filter.update(mid)
+
+    def _try_grab(
+        self,
+        landmarks: Optional[HandLandmarks],
+        document: Document,
+        viewport: Viewport,
+    ) -> None:
+        if landmarks is None:
+            return
+        self._pinch_filter.reset()
+        mid_screen = self._pinch_midpoint_smoothed(landmarks)
+        cx, cy = viewport.screen_to_canvas(
+            float(mid_screen[0]), float(mid_screen[1])
+        )
+        group = document.hit_test_group((cx, cy), self._hit_threshold)
+        if group is None:
+            return
+        self._grabbed_group = group
+        self._initial_pinch_canvas = (cx, cy)
+        # Snapshot original positions so per-frame translate doesn't drift.
+        self._original_points = [
+            list(stroke.points) for stroke in group.strokes
+        ]
+
+    def _release(self) -> None:
+        self._grabbed_group = None
+        self._initial_pinch_canvas = None
+        self._original_points = None
+        self._pinch_filter.reset()
+
+    def _update_position(
+        self, landmarks: HandLandmarks, viewport: Viewport
+    ) -> None:
+        assert self._grabbed_group is not None
+        assert self._initial_pinch_canvas is not None
+        assert self._original_points is not None
+
+        mid_screen = self._pinch_midpoint_smoothed(landmarks)
+        cx, cy = viewport.screen_to_canvas(
+            float(mid_screen[0]), float(mid_screen[1])
+        )
+        ix, iy = self._initial_pinch_canvas
+        dx = cx - ix
+        dy = cy - iy
+        for stroke, original in zip(
+            self._grabbed_group.strokes, self._original_points
+        ):
+            stroke.points = [(x + dx, y + dy) for x, y in original]
 
 
 class ViewHandler:

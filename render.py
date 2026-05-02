@@ -14,8 +14,8 @@ import cv2
 import numpy as np
 
 from document import Document
-from gestures import Gesture, GestureFeatures, INDEX_TIP
-from modes import ERASER_RADIUS
+from gestures import Gesture, GestureFeatures, INDEX_TIP, THUMB_TIP
+from modes import ERASER_RADIUS, GRAB_HIT_THRESHOLD
 from tracker import HAND_CONNECTIONS, HandLandmarks
 from viewport import Viewport
 
