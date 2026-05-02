@@ -1,8 +1,8 @@
 """hand-sketch: webcam app for hand-tracked drawing.
 
-Phase 2 (this file): hand detection + gesture classification with HUD.
-No canvas or glow yet — just verify the gesture pipeline by watching the
-mode label change as you make DRAW / PINCH / PALM poses.
+Phase 3: drawing is live. DRAW mode (one finger up, thumb away) leaves
+cyan trails on a black canvas. PINCH and PALM are classified by the HUD
+but do not change anything yet — those become GRAB and VIEW in later phases.
 
 Run:  python main.py
 Quit: press 'q' in the window.
@@ -10,67 +10,12 @@ Quit: press 'q' in the window.
 
 import cv2
 
-from tracker import HAND_CONNECTIONS, HandTracker
-from gestures import Gesture, GestureStateMachine, classify_raw
-
-
-# OpenCV uses BGR, not RGB.
-COLOR_LANDMARK = (0, 255, 255)    # yellow dots
-COLOR_CONNECTION = (255, 255, 0)  # cyan lines
-
-# Mode -> BGR color for the HUD label.
-MODE_COLORS = {
-    Gesture.DRAW:  (255, 255,   0),  # cyan
-    Gesture.PINCH: (  0, 255, 255),  # yellow
-    Gesture.PALM:  (255,   0, 255),  # magenta
-    Gesture.NONE:  (160, 160, 160),  # gray
-}
-
-
-def draw_hand(frame, landmarks):
-    """Overlay the hand skeleton on `frame` in-place."""
-    pts = landmarks.pixels
-    for a, b in HAND_CONNECTIONS:
-        cv2.line(frame, tuple(pts[a]), tuple(pts[b]), COLOR_CONNECTION, 2)
-    for x, y in pts:
-        cv2.circle(frame, (int(x), int(y)), 4, COLOR_LANDMARK, -1)
-
-
-def draw_hud(frame, mode, raw, features, handedness):
-    """Top-left status block: current debounced mode, raw classification,
-    pinch distance, finger-extension flags, and handedness."""
-    # Big mode label.
-    cv2.putText(
-        frame, f"MODE: {mode.name}", (10, 35),
-        cv2.FONT_HERSHEY_SIMPLEX, 0.9, MODE_COLORS[mode], 2,
-    )
-
-    # Raw classification underneath, dimmer.
-    raw_dim = tuple(c // 2 for c in MODE_COLORS[raw])
-    cv2.putText(
-        frame, f"raw: {raw.name}", (10, 60),
-        cv2.FONT_HERSHEY_SIMPLEX, 0.5, raw_dim, 1,
-    )
-
-    # Diagnostics (only when a hand is visible).
-    if features is not None:
-        ext_str = "".join([
-            "I" if features.index_extended  else ".",
-            "M" if features.middle_extended else ".",
-            "R" if features.ring_extended   else ".",
-            "P" if features.pinky_extended  else ".",
-        ])
-        cv2.putText(
-            frame,
-            f"pinch: {features.pinch_distance:.2f}  fingers: {ext_str}",
-            (10, 82),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1,
-        )
-
-    cv2.putText(
-        frame, handedness, (10, 104),
-        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1,
-    )
+from document import Document
+from gestures import GestureStateMachine, classify_raw
+from modes import DrawHandler, GrabHandler, ViewHandler
+from render import render_frame
+from tracker import HandTracker
+from viewport import Viewport
 
 
 def main():
@@ -80,6 +25,12 @@ def main():
 
     tracker = HandTracker()
     state_machine = GestureStateMachine(debounce_frames=4)
+    document = Document()
+    viewport = Viewport()
+
+    draw_handler = DrawHandler(smoothing_alpha=0.5)
+    grab_handler = GrabHandler()
+    view_handler = ViewHandler()
 
     try:
         while True:
@@ -92,18 +43,16 @@ def main():
 
             landmarks = tracker.process(frame)
             raw_gesture, features = classify_raw(landmarks)
-            mode, _transitions = state_machine.update(raw_gesture)
+            mode, transitions = state_machine.update(raw_gesture)
 
-            handedness = (
-                f"{landmarks.handedness} hand" if landmarks is not None else "no hand"
+            draw_handler.handle(mode, raw_gesture, transitions, landmarks, document, viewport)
+            grab_handler.handle(mode, raw_gesture, transitions, landmarks, document, viewport)
+            view_handler.handle(mode, raw_gesture, transitions, landmarks, document, viewport)
+
+            output = render_frame(
+                frame, document, viewport, landmarks, mode, raw_gesture, features
             )
-
-            if landmarks is not None:
-                draw_hand(frame, landmarks)
-
-            draw_hud(frame, mode, raw_gesture, features, handedness)
-
-            cv2.imshow("hand-sketch (q to quit)", frame)
+            cv2.imshow("hand-sketch (q to quit)", output)
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
     finally:
