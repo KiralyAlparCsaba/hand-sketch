@@ -49,6 +49,11 @@ FINGER_JOINTS = [
 PINCH_THRESHOLD = 0.30   # ratio: (thumb-tip to index-tip dist) / hand size
 EXTENSION_MARGIN = 1.05  # tip must be this much farther from wrist than PIP
 
+# DRAW requires pinch_d above this — a buffer above PINCH_THRESHOLD so that
+# the transition into a pinch (thumb traveling toward index) goes through a
+# NONE dead zone rather than flickering through DRAW.
+DRAW_THUMB_AWAY = 0.50
+
 
 def _dist(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.linalg.norm(a - b))
@@ -115,7 +120,8 @@ def classify_raw(
     if pinch_d < PINCH_THRESHOLD:
         return Gesture.PINCH, features
 
-    if index_ext and not middle_ext and not ring_ext and not pinky_ext:
+    if (index_ext and not middle_ext and not ring_ext and not pinky_ext
+            and pinch_d > DRAW_THUMB_AWAY):
         return Gesture.DRAW, features
 
     if index_ext and middle_ext and ring_ext and pinky_ext:
